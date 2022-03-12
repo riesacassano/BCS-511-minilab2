@@ -1,0 +1,636 @@
+---
+title: "BCS 511 minilab 2"
+author: "Riesa Cassano"
+date: "3/12/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(magrittr)
+library(patchwork)
+library(rstatix)
+```
+
+```{r load data, include=FALSE}
+filename <- 'data/Tadin_study summer 2019-SubjectInformation.csv'
+d <- read_csv(filename)
+# this data is in long format.
+```
+
+### Question 1
+We'll start with just the Naka-Rushton model parameters for the main "Motion" task. Column with sex information has been renamed for my own sanity (Male = 0, Female = 1).
+
+```{r extract motion, echo=FALSE}
+d.mo <- d %>%
+  rename(sex = 'Male (0), Female (1)',
+         sub_id = 'sub ID') %>%
+  mutate(sex = as.factor(sex)) %>%
+  select(sex, sub_id, ends_with('MO')) %>%
+  print()
+
+#print(slice(d.mo,38))
+#print(d.mo$Rmax_MO)
+# one subject didn't do the motion task apparently (NA for all MO model parameters). Another subject has missing data for LOGC50_MO and Weibull_MO only.
+```
+
+Let's visualize the Naka-Rushton model parameters separately, starting with (A) *Rmax*, (B) *slope*, and (C) *C50*. 
+
+```{r function to visualize parameters, echo=FALSE}
+# This function takes the data ('data' - sex and chosen parameter columns only), the binwidth of the histogram ('binwidth' - should be adjusted for each variable), the name with which to label the x-axis ('name'), the panel label ('tag'), and whether or not the panel is the rightmost of the figure ('rightmost' - bool. This keeps the legend and labels it with male/female). It returns a plot.
+plot.param.hist <- function(data, binwidth, name, panel, rightmost=FALSE) {
+  p <- data %>%
+    drop_na() %>% # drop any NAs
+    
+    ggplot(aes(x = param, fill = sex)) +
+    geom_histogram(alpha = 0.7, position = 'identity', binwidth = binwidth) +
+    #geom_histogram(position = 'dodge', binwidth = binwidth) +
+    labs(x = name, tag = panel)
+
+  # deal with legend
+  if(rightmost) {
+    p <- p + scale_fill_discrete(labels = c('male','female'))
+  } else {
+    p <- p + theme(legend.position = 'none')
+  }
+
+  return(p)
+}
+```
+
+```{r visualize parameters, fig.height=3.5, fig.width=10, echo=FALSE}
+p.rmax <- d.mo %>%
+  select(sex, Rmax_MO) %>%
+  rename(param = Rmax_MO) %>%
+  plot.param.hist(0.005, 'Rmax', 'A')
+  
+p.slope <- d.mo %>%
+  select(sex, slope_n_MO) %>%
+  rename(param = slope_n_MO) %>%
+  plot.param.hist(1, 'slope', 'B')
+
+p.C50 <- d.mo %>%
+  select(sex, C50_MO) %>%
+  rename(param = C50_MO) %>%
+  plot.param.hist(1, 'C50', 'C', rightmost=TRUE)
+
+p.rmax + p.slope + p.C50
+```
+
+For each model parameter, are the means of each group significantly different?
+
+```{r t-tests on model parameters, echo=FALSE}
+print(t_test(d.mo, Rmax_MO ~ sex))
+print(t_test(d.mo, slope_n_MO ~ sex))
+print(t_test(d.mo, C50_MO ~ sex))
+```
+
+A two-samples t-test showed that the difference between mean *Rmax* for females and males was very highly significant (p < 0.001), such that females had a higher minimum duration threshold. The difference between mean *slope* and mean *C50* for females and males was not significant (p = 0.397 and p = 0.283 respectively). (I didn't check that the values were approximately normally distributed. This could be a problem for C50, as both male and female distributions appear to have a right skew.) 
+
+### Question 2
+What about the alternative measures? For *Rmax*, its reciprocal (*Asymp*) or the log-transform of the reciprocal (*Log Asymp*); for *C50*, its log-transform (*Log C50*).
+
+First let's compare *Rmax* side-by-side with *Asymp* and *Log Asymp*.
+
+```{r visualize Rmax and alternatives, fig.height=3.5, fig.width=10, echo=FALSE}
+p.rmax <- d.mo %>%
+  select(sex, Rmax_MO) %>%
+  rename(param = Rmax_MO) %>%
+  plot.param.hist(0.005, 'Rmax', 'A')
+
+p.asymp <- d.mo %>%
+  select(sex, Asymp_MO) %>%
+  rename(param = Asymp_MO) %>%
+  plot.param.hist(5, 'Asymp', 'B')
+
+p.logasymp <- d.mo %>%
+  select(sex, LOG_Asymp_MO) %>%
+  rename(param = LOG_Asymp_MO) %>%
+  plot.param.hist(0.1, 'Log Asymp', 'C', rightmost=TRUE)
+
+p.rmax + p.asymp + p.logasymp
+```
+
+Like *Rmax*, the distributions of *Asymp* and *Log Asymp* look like their means could be different. But we'll use t-test to see:
+
+```{r t-tests on Rmax alt model parameters, echo=FALSE}
+print(t_test(d.mo, Asymp_MO ~ sex))
+print(t_test(d.mo, LOG_Asymp_MO ~ sex))
+```
+The difference between both mean *Asymp* and mean *Log Asymp* for females and males was very highly significant (p < 0.001). It is comforting that the difference between males and females for *Rmax* seems to hold up with these transformations.
+
+What about *C50*?
+
+```{r visualize C50 and log-transform, fig.height=3.5, fig.width=7, echo=FALSE}
+p.C50 <- d.mo %>%
+  select(sex, C50_MO) %>%
+  rename(param = C50_MO) %>%
+  plot.param.hist(1, 'C50', 'A')
+  
+p.logC50 <- d.mo %>%
+  select(sex, LOG_C50_MO) %>%
+  rename(param = LOG_C50_MO) %>%
+  plot.param.hist(0.1, 'Log C50', 'B', rightmost=TRUE)
+
+p.C50 + p.logC50
+```
+
+The distributions of the log-transformed values are less skewed than the original distributions. Are the means significantly different?
+
+```{r t-test on log C50, echo=FALSE}
+print(t_test(d.mo, LOG_C50_MO ~ sex))
+```
+
+The difference between mean *Log C50* for females and males was significant (p < 0.05). It's more convincing that *Log C50* is the "native" form of this parameter, since the *C50* distributions are skewed and *Log C50* distributions are not. 
+
+Now, let's exclude 'outliers' - values that are more than 3 SD away from the cross-subject mean. For this, we'll treat the male and female distributions as separate. First, we'll check for outliers.
+
+```{r check for outliers, echo=FALSE}
+param_list <- c('Rmax_MO','Asymp_MO','LOG_Asymp_MO',
+                'slope_n_MO','C50_MO','LOG_C50_MO')
+
+for (param in param_list){
+  male <- d.mo %>%
+    filter(sex==0) %>% # male
+    select(all_of(param)) %>%
+    drop_na() %>%
+    pull()
+  
+  m_lower_bound <- mean(male) - 3 * sd(male)
+  m_upper_bound <- mean(male) + 3 * sd(male)
+  
+  m_above <- male[male > m_upper_bound]
+  m_below <- male[male < m_lower_bound]
+  num_m_outside <- length(m_above) + length(m_below)
+  
+  female <- d.mo %>%
+    filter(sex==1) %>% # female
+    select(all_of(param)) %>%
+    drop_na() %>%
+    pull()
+  
+  f_lower_bound <- mean(female) - 3 * sd(female)
+  f_upper_bound <- mean(female) + 3 * sd(female)
+  
+  f_above <- female[female > f_upper_bound]
+  f_below <- female[female < f_lower_bound]
+  num_f_outside <- length(f_above) + length(f_below)
+  
+  cat(param,' values outside 3 SD: male (',num_m_outside,
+      '), female (',num_f_outside, ')\n',sep="")
+}
+```
+
+Only *C50* and *log C50* have values that fall outside three standard deviations of the mean in the female distribution. It's pretty clear from the plots above which values those are: the value at ~22 for *C50* and at ~0 for *Log C50*. After removing those:
+
+```{r redo C50 and log C50 without >3SD, fig.height=3.5, fig.width=7, echo=FALSE}
+# brute force filtering, since there's only one value and I'm lazy...
+filt_c50 <- d.mo %>%
+  select(c(sex,C50_MO)) %>%
+  drop_na() %>%
+  filter(C50_MO < 20)
+
+filt_log_c50 <- d.mo %>%
+  select(c(sex,LOG_C50_MO)) %>%
+  drop_na() %>%
+  filter(LOG_C50_MO > 0.2)
+
+p.C50 <- filt_c50 %>%
+  rename(param = C50_MO) %>%
+  plot.param.hist(1, 'C50', 'A')
+  
+p.logC50 <- filt_log_c50 %>%
+  rename(param = LOG_C50_MO) %>%
+  plot.param.hist(0.1, 'Log C50', 'B', rightmost=TRUE)
+
+p.C50 + p.logC50
+```
+
+```{r redo t-test, echo=FALSE}
+print(t_test(filt_c50, C50_MO ~ sex))
+print(t_test(filt_log_c50, LOG_C50_MO ~ sex))
+```
+
+Without the one 'outlier', the difference between mean *C50* for males and females becomes significantly different (p < 0.05). The difference between mean *log C50* is significantly different (p < 0.05) whether or not the 'outlier' is removed. This difference in p-value for *C50* seems to be driven by the male distribution having a heavier right tail whereas the female distribution only had one value to give it a right skew.
+
+### Question 3
+Do sex-related effects differ significantly between the three parameters? First normalize the three parameters and visualize them grouped by sex:
+
+```{r sex effects on different parameters, echo=FALSE}
+d.mo.gathered <- d.mo %>%
+  select(c(-sub_id, -Asymp_MO, -Weibull_MO, -LOG_Asymp_MO, -LOG_C50_MO)) %>%
+  mutate_at(vars(-sex), ~(scale(.) %>% as.vector)) %>%
+  pivot_longer(-sex, names_to = 'param_name', values_to = 'value', 
+               values_drop_na = TRUE)
+
+ggplot(d.mo.gathered, aes(x = sex, y = value, color = param_name)) + 
+  geom_point(position = position_dodge(width = 0.3))
+
+# model with interaction between sex and parameter
+lm.w.int <- lm(value ~ 1 + sex + param_name + sex*param_name, data = d.mo.gathered)
+summary(lm.w.int)
+
+# model without interaction term
+lm.wo.int <- lm(value ~ 1 + sex + param_name, data = d.mo.gathered)
+summary(lm.wo.int)
+
+anova(lm.wo.int, lm.w.int, test = 'Chisq')
+```
+
+The interaction term adds to the model in a meaningful way above and beyond the `sex` and `param_name` variables themselves. This suggests that sex affects the different parameters differently.
+
+### Question 4
+Run the analysis from questions 1 and 2 for the Static Mask task.
+
+```{r extract static mask, echo=FALSE}
+d.ma <- d %>%
+  rename(sex = 'Male (0), Female (1)',
+         sub_id = 'sub ID') %>%
+  mutate(sex = as.factor(sex)) %>%
+  select(sex, sub_id, ends_with('MA')) 
+```
+
+```{r visualize MA parameters, fig.height=3.5, fig.width=10, echo=FALSE}
+p.rmax <- d.ma %>%
+  select(sex, Rmax_MA) %>%
+  rename(param = Rmax_MA) %>%
+  plot.param.hist(0.02, 'Rmax', 'A')
+  
+p.slope <- d.ma %>%
+  select(sex, slope_n_MA) %>%
+  rename(param = slope_n_MA) %>%
+  plot.param.hist(0.5, 'slope', 'B')
+
+p.C50 <- d.ma %>%
+  select(sex, C50_MA) %>%
+  rename(param = C50_MA) %>%
+  plot.param.hist(5, 'C50', 'C', rightmost=TRUE)
+
+p.rmax + p.slope + p.C50
+```
+
+Just based on these visualizations, there appears to be no sex difference in any of the parameters in this task.
+
+```{r t-tests on model parameters for MA, echo=FALSE}
+print(t_test(d.ma, Rmax_MA ~ sex))
+print(t_test(d.ma, slope_n_MA ~ sex))
+print(t_test(d.ma, C50_MA ~ sex))
+```
+
+As expected, the difference between male and female is not significant for any of the parameters in this task (p > 0.05).
+
+Now, we'll look at the transformed parameters: *Asymp*, *Log Asymp*, and *Log C50*.
+```{r visualize alt MA parameters, fig.height=3.5, fig.width=10, echo=FALSE}
+p.asymp <- d.ma %>%
+  select(sex, Asymp_MA) %>%
+  rename(param = Asymp_MA) %>%
+  plot.param.hist(5, 'Asymp', 'A')
+  
+p.logasymp <- d.ma %>%
+  select(sex, LOG_Asymp_MA) %>%
+  rename(param = LOG_Asymp_MA) %>%
+  plot.param.hist(0.2, 'Log Asymp', 'B')
+
+p.logC50 <- d.ma %>%
+  select(sex, LOG_C50_MA) %>%
+  rename(param = LOG_C50_MA) %>%
+  plot.param.hist(0.1, 'Log C50', 'C', rightmost=TRUE)
+
+p.asymp + p.logasymp + p.logC50
+```
+
+```{r t-tests on alt model parameters for MA, echo=FALSE}
+print(t_test(d.ma, Asymp_MA ~ sex))
+print(t_test(d.ma, LOG_Asymp_MA ~ sex))
+print(t_test(d.ma, LOG_C50_MA ~ sex))
+```
+
+The difference between male and female is not significant for any of the transformed parameters in this task (p > 0.05).
+
+Run the analysis from questions 1 and 2 for the Static Angular task.
+```{r extract static angular, echo=FALSE}
+d.an <- d %>%
+  rename(sex = 'Male (0), Female (1)',
+         sub_id = 'sub ID') %>%
+  mutate(sex = as.factor(sex)) %>%
+  select(sex, sub_id, ends_with('AN')) #%>%
+  #print()
+
+```
+
+```{r visualize AN parameters, fig.height=3.5, fig.width=10, echo=FALSE}
+p.rmax <- d.an %>%
+  select(sex, Rmax_AN) %>%
+  rename(param = Rmax_AN) %>%
+  plot.param.hist(0.1, 'Rmax', 'A')
+  
+p.slope <- d.an %>%
+  select(sex, slope_n_AN) %>%
+  rename(param = slope_n_AN) %>%
+  plot.param.hist(0.5, 'slope', 'B')
+
+p.C50 <- d.an %>%
+  select(sex, C50_AN) %>%
+  rename(param = C50_AN) %>%
+  plot.param.hist(5, 'C50', 'C', rightmost=TRUE)
+
+p.rmax + p.slope + p.C50
+```
+
+Just based on these visualizations, there appears to be no sex difference in any of the parameters in this task.
+
+```{r t-tests on model parameters for AN, echo=FALSE}
+print(t_test(d.an, Rmax_AN ~ sex))
+print(t_test(d.an, slope_n_AN ~ sex))
+print(t_test(d.an, C50_AN ~ sex))
+```
+
+As expected, the difference between male and female is not significant for any of the parameters in this task (p > 0.05).
+
+
+Now, we'll look at the transformed parameters: *Asymp*, *Log Asymp*, and *Log C50*.
+```{r visualize alt AN parameters, fig.height=3.5, fig.width=10, echo=FALSE}
+p.asymp <- d.an %>%
+  select(sex, Asymp_AN) %>%
+  rename(param = Asymp_AN) %>%
+  plot.param.hist(0.2, 'Asymp', 'A')
+  
+p.logasymp <- d.an %>%
+  select(sex, LOG_Asymp_AN) %>%
+  rename(param = LOG_Asymp_AN) %>%
+  plot.param.hist(0.1, 'Log Asymp', 'B')
+
+p.logC50 <- d.an %>%
+  select(sex, LOG_C50_AN) %>%
+  rename(param = LOG_C50_AN) %>%
+  plot.param.hist(0.1, 'Log C50', 'C', rightmost=TRUE)
+
+p.asymp + p.logasymp + p.logC50
+```
+
+```{r t-tests on alt model parameters for AN, echo=FALSE}
+print(t_test(d.an, Asymp_AN ~ sex))
+print(t_test(d.an, LOG_Asymp_AN ~ sex))
+print(t_test(d.an, LOG_C50_AN ~ sex))
+```
+
+The difference between male and female is not significant for any of the transformed parameters in this task (p > 0.05).
+
+### Question 5
+
+Visualize correlations between sex and each of the individual difference variables.
+
+```{r sex and individual difference measures, echo=FALSE}
+ind.diff <- d[c('Male (0), Female (1)', 'Video game playingh',
+                'Emphatising quotient','Systemizing quotient', 'ADHD', 
+                'Autism Quptient')]
+ind.diff %<>% rename(sex = 'Male (0), Female (1)',
+                     video_game = 'Video game playingh',
+                     emphatising_q = 'Emphatising quotient',
+                     systemizing_q = 'Systemizing quotient',
+                     adhd = 'ADHD',
+                     autism_q = 'Autism Quptient')
+```
+
+
+Video game playing is a categorical variable and expressed as a table and as a scatterplot with the size of the points corresponding to the number of subjects:
+
+```{r video game summary table, fig.width = 4, fig.height = 2.5, echo=FALSE}
+id.vid <- ind.diff %>%
+  select(c(sex, video_game)) %>%
+  group_by(sex, video_game) %>%
+  summarize(count = n()) %>%
+  print()
+
+p.vid <- ggplot(id.vid, aes(x = sex, y = video_game)) +
+  geom_point(aes(size = count)) +
+  geom_smooth(method = lm, formula = y ~ x)
+p.vid
+```
+
+Visualizing other variables compared to sex:
+
+```{r visualize sex and individual difference measures, echo=FALSE}
+p.eq <- ggplot(ind.diff, aes(x = sex, y = emphatising_q)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.sq <- ggplot(ind.diff, aes(x = sex, y = systemizing_q)) +
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.adhd <- ggplot(ind.diff, aes(x = sex, y = adhd)) +
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.aq <- ggplot(ind.diff, aes(x = sex, y = autism_q)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+(p.eq | p.sq) / (p.adhd | p.aq)
+```
+
+Is there a difference between the means of the distributions of the individual difference measures for males and females?
+
+```{r t-tests, individual differences, echo=FALSE}
+print(t_test(ind.diff, video_game ~ sex))
+print(t_test(ind.diff, emphatising_q ~ sex))
+print(t_test(ind.diff, systemizing_q ~ sex))
+print(t_test(ind.diff, adhd ~ sex))
+print(t_test(ind.diff, autism_q ~ sex))
+```
+
+It may not be appropriate to run a t-test on the video game measure since it is a categorical measure. Just looking at the table above however, it is clear that there is a difference between males and females on video game playing where females play video games less. The means of the emphatizing quotient and ADHD measures are not significantly for males and females are not significantly different (p > 0.05) and the means of the systemizing quotient and autism quotient measures are marginally different (p < 0.10).
+
+### Question 6
+
+Are the individual difference measures correlated with each other?
+
+```{r correlate ind diff measures, fig.height=12, fig.width=10, echo=FALSE}
+p.vid_eq <- ggplot(ind.diff, aes(x = video_game, y = emphatising_q)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+  
+p.vid_sq <- ggplot(ind.diff, aes(x = video_game, y = systemizing_q)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+  
+p.vid_adhd <- ggplot(ind.diff, aes(x = video_game, y = adhd)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.vid_aut <- ggplot(ind.diff, aes(x = video_game, y = autism_q)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.eq_sq <- ggplot(ind.diff, aes(x = emphatising_q, y = systemizing_q)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.eq_adhd <- ggplot(ind.diff, aes(x = emphatising_q, y = adhd)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.eq_aut <- ggplot(ind.diff, aes(x = emphatising_q, y = autism_q)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.sq_adhd <- ggplot(ind.diff, aes(x = systemizing_q, y = adhd)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.sq_aut <- ggplot(ind.diff, aes(x = systemizing_q, y = autism_q)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.adhd_aut <- ggplot(ind.diff, aes(x = adhd, y = autism_q)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+(p.vid_eq | p.vid_sq | p.vid_adhd | p.vid_aut) / 
+  (p.eq_sq | p.eq_adhd | p.eq_aut) /
+  (p.sq_adhd | p.sq_aut | p.adhd_aut)
+
+```
+
+Are the individual difference measures correlated with each other?
+
+```{r lm compare ind diff measures, echo=FALSE}
+summary(lm(emphatising_q ~ video_game, data = ind.diff))
+summary(lm(systemizing_q ~ video_game, data = ind.diff))
+summary(lm(adhd ~ video_game, data = ind.diff))
+summary(lm(autism_q ~ video_game, data = ind.diff))
+
+summary(lm(systemizing_q ~ emphatising_q, data = ind.diff))
+summary(lm(adhd ~ emphatising_q, data = ind.diff))
+summary(lm(autism_q ~ emphatising_q, data = ind.diff))
+
+summary(lm(adhd ~ systemizing_q, data = ind.diff))
+summary(lm(autism_q ~ systemizing_q, data = ind.diff))
+
+summary(lm(adhd ~ autism_q, data = ind.diff))
+```
+
+ADHD is correlated with video game playing (p < 0.05, R^2 = 0.1067). Autism quotient is highly negatively correlated with emphatizing quotient (p < 0.001, R^2 = 0.452), consistent with Wheelwright et al. (2006). Relationships between other pairs of individual difference measures are not significant.
+
+### Question 7
+
+I'll limit myself to *Rmax* in the main motion task.
+
+```{r put desired data in a tibble, echo=FALSE}
+d.q7 <- ind.diff
+d.q7$Rmax_MO <- d.mo$Rmax_MO
+d.q7 <- drop_na(d.q7)
+```
+
+Visualize the relationships between each of the individual difference measures and *Rmax*.
+
+```{r visualize Rmax and all IVs, fig.height=6, fig.width=10, echo=FALSE}
+p.sex <- ggplot(d.q7, aes(x = sex, y = Rmax_MO)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.vid <- ggplot(d.q7, aes(x = video_game, y = Rmax_MO)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.emph <- ggplot(d.q7, aes(x = emphatising_q, y = Rmax_MO)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.sys <- ggplot(d.q7, aes(x = systemizing_q, y = Rmax_MO)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.adhd <- ggplot(d.q7, aes(x = adhd, y = Rmax_MO)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+p.aut<- ggplot(d.q7, aes(x = autism_q, y = Rmax_MO)) + 
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x)
+
+(p.sex | p.vid | p.emph) / (p.sys | p.adhd | p.aut)
+```
+
+Are any of the individual difference measures correlated with *Rmax*?
+```{r lm single IDs, echo=FALSE}
+summary(lm(Rmax_MO ~ video_game, d.q7))
+summary(lm(Rmax_MO ~ emphatising_q, d.q7))
+summary(lm(Rmax_MO ~ systemizing_q, d.q7))
+summary(lm(Rmax_MO ~ adhd, d.q7))
+summary(lm(Rmax_MO ~ autism_q, d.q7))
+```
+
+Both video game playing and ADHD are significantly correlated with *Rmax* (p < 0.05 and p < 0.01 respectively).
+
+
+```{r different models, echo=FALSE}
+lm.sex <- lm(Rmax_MO ~ sex, data=d.q7)
+lm.vid <- lm(Rmax_MO ~ video_game, data=d.q7)
+lm.adhd <- lm(Rmax_MO ~ adhd, data=d.q7)
+lm.sex_vid <- lm(Rmax_MO ~ sex + video_game, data=d.q7)
+lm.sex_adhd <- lm(Rmax_MO ~ sex + adhd, data=d.q7)
+lm.vid_adhd <- lm(Rmax_MO ~ video_game + adhd, data=d.q7)
+lm.sex_vid_adhd <- lm(Rmax_MO ~ sex + video_game + adhd, data=d.q7)
+
+lm.all_id <- lm(Rmax_MO ~ sex + video_game + emphatising_q + systemizing_q + 
+                  adhd + autism_q, data=d.q7)
+```
+
+First, we'll look at a model that uses all of the I.D. measures to predict *Rmax*. Using ANOVA (as above), this model is compared to the model that just uses sex to predict *Rmax* to see if the additional degrees of freedom from the I.D. measures are beneficial to the prediction of *Rmax*.
+
+```{r summarize all IDs, echo=FALSE}
+summary(lm.all_id)
+anova(lm.sex, lm.all_id, test='Chisq')
+```
+
+As expected, the model with all of the I.D. measures is only marginally better. This suggests that the additional degrees of freedom from the additional predictors is not worth the predictive power gained.
+
+From the tests and visualizations above, video game playing is highly correlated with sex and video game playing is also correlated with ADHD. It is possible that the relationship between video game playing and *Rmax* is mediated by ADHD. From above, we know that there is a relationship between *Rmax* and video game playing. If ADHD mediates this relationship, then when ADHD is added to the model, the video game coefficient will become insignificant.
+
+```{r summarize video games, ADHD, echo=FALSE}
+summary(lm.vid_adhd)
+```
+
+As expected, the video game coefficient becomes insignificant when ADHD is added to the model, suggesting that ADHD mediates the relationship between *Rmax* and video game playing. I expect that the difference between *Rmax* predicted by ADHD and video game playing and *Rmax* predicted by just ADHD is not significant. This would suggest that video game playing doesn't add new information.
+
+```{r compare video games, ADHD, echo=FALSE}
+anova(lm.adhd, lm.vid_adhd, test='Chisq')
+```
+
+As expected, the difference between these two models is not significant.
+
+In the question 5 tests, the relationship between ADHD and sex is not significant. However, considering that ADHD mediates the relationship between video game playing and *Rmax*, ADHD might mediate the relationship between sex and *Rmax*. We know that sex predicts *Rmax*. If ADHD mediates, then when both sex and ADHD are used to predict *Rmax*, the sex coefficient will not be significant.
+
+```{r summarize sex, ADHD, echo=FALSE}
+summary(lm.sex_adhd)
+```
+
+The sex coefficient in this model is still highly significant, suggesting that ADHD does not mediate the relationship between sex and *Rmax*. I expect that the model using ADHD and sex will be significantly different from the model just using ADHD since sex adds new information.
+
+```{r compare sex, ADHD, echo=FALSE}
+anova(lm.adhd, lm.sex_adhd, test='Chisq')
+```
+
+Indeed, this is the case.
+
+Let's return to the model that uses all of the I.D. measures. Now that we know that the relationship between video game playing and *Rmax* is mediated by ADHD, let's drop video game playing from the model. Dropping video games from the big model reduces the degrees of freedom.
+
+```{r all but video games, echo=FALSE}
+lm.all_id_but_vid <- lm(Rmax_MO ~ sex + adhd + emphatising_q + systemizing_q + 
+                   autism_q, data=d.q7)
+summary(lm.all_id_but_vid)
+anova(lm.sex, lm.all_id_but_vid, test='Chisq')
+```
+
+Do the other I.D. measures (emphatizing quotient, systemizing quotient, and autism quotient) predict *Rmax*? Now we'll compare the model that includes these three measures (along with sex and ADHD) with the model that just uses sex and ADHD. If these three quotients add any new information, the difference between these models will be significant. However, I suspect that the predictive power of these measures is not worth the degrees of freedom.
+
+```{r compare with and without quotients, echo=FALSE}
+anova(lm.sex_adhd, lm.all_id_but_vid, test='Chisq')
+```
+
+As expected, the difference between these two models is not significant. We know from the tests in questions 5 and 6 that autism quotient and emphatizing quotient are highly negatively correlated, but neither is significantly correlated with sex. It is probably not worthwhile to explore these relationships further since they likely won't tell us anything about how sex relates to *Rmax*.
